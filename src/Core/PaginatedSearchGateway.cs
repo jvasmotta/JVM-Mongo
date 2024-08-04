@@ -5,61 +5,91 @@ using MongoDB.Driver;
 
 namespace JVM_Mongo;
 
+public record PaginatedHeader<TMetadata>(
+    [property: BsonId] string CollectionName,
+    TMetadata Metadata,
+    byte[] SearchParameters,
+    long? TotalElements,
+    DateTime CreatedAt,
+    DateTime ExpiresAt) where TMetadata : class, IEquatable<TMetadata>;
+
+public record PaginatedResult<TOut>(
+    int Page,
+    int Size,
+    bool NextPage,
+    long? TotalElements,
+    IEnumerable<TOut> Results);
+
+
 public interface IPaginatedSearchGateway
 {
-    Task<Result<TOut>> GetOrCreateAsync<TOut, TRequest>(string clientId, int page, int size, TRequest searchRequest, IEnumerator<TOut> fetchFunc);
-    void CleanExpiredResults(DateTime timestamp);
+    Task<PaginatedResult<TOut>> GetOrCreate<TOut, TMetadata, TRequest>(
+        TMetadata metadata, 
+        TRequest searchRequest,
+        Func<IAsyncEnumerable<TOut>> fetchFunc, 
+        int page = 0, 
+        int size = 100) where TMetadata : class, IEquatable<TMetadata>;
 
-    public record Header([property: BsonId] string CollectionName, string ClientId, byte[] SearchParameters, long? TotalElements, DateTime CreatedAt, DateTime ExpiresAt);
-    public record Result<TOut>(int Page, int Size, bool NextPage, long? TotalElements, IEnumerable<TOut> Results);
+    Task UpdateHeaderTotalElements<TMetadata, TRequest>(
+        TMetadata metadata, 
+        TRequest searchRequest, 
+        long totalElements) where TMetadata : class, IEquatable<TMetadata>;
 
-    void UpdateHeaderTotalElements<TRequest>(string clientId, TRequest searchRequest, long totalElements);
+    void CleanExpiredResults<TMetadata>(DateTime timestamp) where TMetadata : class, IEquatable<TMetadata>;
 }
 
-public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>? generateObjectId = null) : IPaginatedSearchGateway
+public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>? idGeneratorFunc = null) : IPaginatedSearchGateway
 {
     public const string HeaderCollectionName = "PaginatedSearchHeader";
+    private readonly Func<ObjectId> _idGeneratorFunc = idGeneratorFunc ?? ObjectId.GenerateNewId;
 
-    private readonly Func<ObjectId> _generateObjectId = generateObjectId ?? ObjectId.GenerateNewId;
-
-    public async Task<IPaginatedSearchGateway.Result<TOut>> GetOrCreateAsync<TOut, TRequest>(string clientId, int page, int size, TRequest searchRequest, IEnumerator<TOut> fetchFunc)
+    public async Task<PaginatedResult<TOut>> GetOrCreate<TOut, TMetadata, TRequest>(
+        TMetadata metadata, 
+        TRequest searchRequest,
+        Func<IAsyncEnumerable<TOut>> fetchFunc, 
+        int page = 0, 
+        int size = 100) where TMetadata : class, IEquatable<TMetadata>
     {
-        var searchHeaderCollection = mongoDatabase.GetCollection<IPaginatedSearchGateway.Header>(HeaderCollectionName);
+        var searchHeaderCollection = mongoDatabase.GetCollection<PaginatedHeader<TMetadata>>(HeaderCollectionName);
         var binarySearchRequest = JsonSerializer.SerializeToUtf8Bytes(searchRequest);
 
         var header = await searchHeaderCollection.FindOneAndUpdateAsync(
-            Builders<IPaginatedSearchGateway.Header>.Filter.Eq(psc => psc.ClientId, clientId) &
-            Builders<IPaginatedSearchGateway.Header>.Filter.Eq(psc => psc.SearchParameters, binarySearchRequest),
-            Builders<IPaginatedSearchGateway.Header>.Update.SetOnInsert(psc => psc.CollectionName, $"PaginatedSearchResult_{_generateObjectId()}")
+            Builders<PaginatedHeader<TMetadata>>.Filter.Eq(psc => psc.Metadata, metadata) &
+            Builders<PaginatedHeader<TMetadata>>.Filter.Eq(psc => psc.SearchParameters, binarySearchRequest),
+            Builders<PaginatedHeader<TMetadata>>.Update.SetOnInsert(psc => psc.CollectionName, $"PaginatedSearchResult_{_idGeneratorFunc()}")
                 .SetOnInsert(psc => psc.TotalElements, null)
                 .SetOnInsert(psc => psc.CreatedAt, DateTime.UtcNow)
                 .SetOnInsert(psc => psc.ExpiresAt, DateTime.UtcNow.AddMinutes(30)),
-            new FindOneAndUpdateOptions<IPaginatedSearchGateway.Header> { IsUpsert = true, ReturnDocument = ReturnDocument.After }
+            new FindOneAndUpdateOptions<PaginatedHeader<TMetadata>> { IsUpsert = true, ReturnDocument = ReturnDocument.After }
         );
 
         var searchResultCollection = mongoDatabase.GetCollection<TOut>(header.CollectionName);
         var totalDocuments = await searchResultCollection.CountDocumentsAsync(_ => true);
         var results = await searchResultCollection.Find(_ => true).Skip(page * size).Limit(size).ToListAsync();
+
         if (results.Any())
-            return new IPaginatedSearchGateway.Result<TOut>(page, size, totalDocuments / size > page, header.TotalElements, results);
+            return new PaginatedResult<TOut>(page, size, totalDocuments > (page + 1) * size, header.TotalElements, results);
 
         return await FetchAndInsertAsync(header, searchResultCollection, fetchFunc, page, size);
     }
 
-    public void UpdateHeaderTotalElements<TRequest>(string clientId, TRequest searchRequest, long totalElements)
+    public async Task UpdateHeaderTotalElements<TMetadata, TRequest>(
+        TMetadata metadata, 
+        TRequest searchRequest, 
+        long totalElements) where TMetadata : class, IEquatable<TMetadata>
     {
-        var searchHeaderCollection = mongoDatabase.GetCollection<IPaginatedSearchGateway.Header>(HeaderCollectionName);
+        var searchHeaderCollection = mongoDatabase.GetCollection<PaginatedHeader<TMetadata>>(HeaderCollectionName);
         var binarySearchRequest = JsonSerializer.SerializeToUtf8Bytes(searchRequest);
 
-        searchHeaderCollection.FindOneAndUpdateAsync(
-            Builders<IPaginatedSearchGateway.Header>.Filter.Eq(psc => psc.ClientId, clientId) &
-            Builders<IPaginatedSearchGateway.Header>.Filter.Eq(psc => psc.SearchParameters, binarySearchRequest),
-            Builders<IPaginatedSearchGateway.Header>.Update.Set(psc => psc.TotalElements, totalElements));
+        await searchHeaderCollection.FindOneAndUpdateAsync<TMetadata>(
+            Builders<PaginatedHeader<TMetadata>>.Filter.Eq(psc => psc.Metadata, metadata) &
+            Builders<PaginatedHeader<TMetadata>>.Filter.Eq(psc => psc.SearchParameters, binarySearchRequest),
+            Builders<PaginatedHeader<TMetadata>>.Update.Set(psc => psc.TotalElements, totalElements));
     }
 
-    public void CleanExpiredResults(DateTime timestamp)
+    public void CleanExpiredResults<TMetadata>(DateTime timestamp) where TMetadata : class, IEquatable<TMetadata>
     {
-        var searchHeaderCollection = mongoDatabase.GetCollection<IPaginatedSearchGateway.Header>(HeaderCollectionName);
+        var searchHeaderCollection = mongoDatabase.GetCollection<PaginatedHeader<TMetadata>>(HeaderCollectionName);
         var headerCursor = searchHeaderCollection.Find(h => h.ExpiresAt < timestamp).ToCursor();
 
         while (headerCursor.MoveNext())
@@ -70,19 +100,19 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
             }
     }
 
-    private async Task<IPaginatedSearchGateway.Result<TOut>> FetchAndInsertAsync<TOut>(
-        IPaginatedSearchGateway.Header header,
+    private async Task<PaginatedResult<TOut>> FetchAndInsertAsync<TMetadata, TOut>(
+        PaginatedHeader<TMetadata> paginatedHeader,
         IMongoCollection<TOut> searchResultCollection,
-        IEnumerator<TOut> fetchFunc,
+        Func<IAsyncEnumerable<TOut>> fetchFunc,
         int page,
-        int size)
+        int size) where TMetadata : class, IEquatable<TMetadata>
     {
         try
         {
             var documentsToInsert = new List<TOut>();
-            while (fetchFunc.MoveNext())
+            await foreach (var item in fetchFunc())
             {
-                documentsToInsert.Add(fetchFunc.Current);
+                documentsToInsert.Add(item);
                 if (documentsToInsert.Count < size * (page + 1))
                     continue;
                 
@@ -92,7 +122,7 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
                 _ = Task.Run(async () =>
                 {
                     await Task.Yield();
-                    await InsertRemainingDocumentsAsync(header, searchResultCollection, fetchFunc);
+                    await InsertRemainingDocumentsAsync(paginatedHeader, searchResultCollection, fetchFunc);
                 });
                 break;
             }
@@ -101,36 +131,38 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
                 await searchResultCollection.InsertManyAsync(documentsToInsert);
 
             var totalDocuments = await searchResultCollection.CountDocumentsAsync(_ => true);
-            var results = searchResultCollection.Find(_ => true).Skip(page * size).Limit(size).ToList();
-            return new IPaginatedSearchGateway.Result<TOut>(page, size, totalDocuments / size > page, header.TotalElements, results);
+            var results = await searchResultCollection.Find(_ => true).Skip(page * size).Limit(size).ToListAsync();
+            return new PaginatedResult<TOut>(page, size, totalDocuments / size > page, paginatedHeader.TotalElements, results);
         }
         catch (Exception)
         {
-            return new IPaginatedSearchGateway.Result<TOut>(page, size, false, 0, Array.Empty<TOut>());
+            return new PaginatedResult<TOut>(page, size, false, 0, Array.Empty<TOut>());
         }
     }
-    private async Task InsertRemainingDocumentsAsync<TOut>(
-        IPaginatedSearchGateway.Header header, 
-        IMongoCollection<TOut> searchResultCollection, 
-        IEnumerator<TOut> fetchFunc)
+    private async Task InsertRemainingDocumentsAsync<TMetadata, TOut>(
+        PaginatedHeader<TMetadata> paginatedHeader, 
+        IMongoCollection<TOut> searchResultCollection,
+        Func<IAsyncEnumerable<TOut>> fetchFunc) where TMetadata : class, IEquatable<TMetadata>
     {
         var documentsToInsert = new List<TOut>();
-        while (fetchFunc.MoveNext()) 
-            documentsToInsert.Add(fetchFunc.Current);
-        
+        await foreach (var item in fetchFunc()) 
+            documentsToInsert.Add(item);
+
         if (documentsToInsert.Any()) 
             await searchResultCollection.InsertManyAsync(documentsToInsert);
 
         var totalDocuments = await searchResultCollection.CountDocumentsAsync(_ => true);
-        await UpdateHeaderTotalElements(header, totalDocuments);
+        await UpdateHeaderTotalElements(paginatedHeader, totalDocuments);
     }
 
-    private async Task UpdateHeaderTotalElements(IPaginatedSearchGateway.Header header, long totalDocuments)
+    private async Task UpdateHeaderTotalElements<TMetadata>(
+        PaginatedHeader<TMetadata> paginatedHeader, 
+        long totalDocuments) where TMetadata : class, IEquatable<TMetadata>
     {
-        var searchHeaderCollection = mongoDatabase.GetCollection<IPaginatedSearchGateway.Header>(HeaderCollectionName);
-        var filter = Builders<IPaginatedSearchGateway.Header>.Filter.Eq(psc => psc.CollectionName, header.CollectionName);
-        var update = Builders<IPaginatedSearchGateway.Header>.Update.Set(psc => psc.TotalElements, totalDocuments);
-        var options = new FindOneAndUpdateOptions<IPaginatedSearchGateway.Header> { ReturnDocument = ReturnDocument.After };
+        var searchHeaderCollection = mongoDatabase.GetCollection<PaginatedHeader<TMetadata>>(HeaderCollectionName);
+        var filter = Builders<PaginatedHeader<TMetadata>>.Filter.Eq(psc => psc.CollectionName, paginatedHeader.CollectionName);
+        var update = Builders<PaginatedHeader<TMetadata>>.Update.Set(psc => psc.TotalElements, totalDocuments);
+        var options = new FindOneAndUpdateOptions<PaginatedHeader<TMetadata>> { ReturnDocument = ReturnDocument.After };
 
         await searchHeaderCollection.FindOneAndUpdateAsync(filter, update, options);
     }
