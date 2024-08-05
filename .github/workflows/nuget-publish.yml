@@ -1,9 +1,8 @@
 name: Publish to NuGet
 
 on:
-  push:
-    branches:
-      - master  # Change this to your release branch
+  release:
+    types: [published]
 
 jobs:
   build:
@@ -24,7 +23,7 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Pack
-      run: dotnet pack --configuration Release --no-build
+      run: dotnet pack --configuration Release --no-build /p:PackageVersion=${{ github.event.release.tag_name }}
 
     - name: Push to NuGet
       env:
