@@ -41,48 +41,25 @@ public class BasicMongoGateway <T> : IBasicMongoGateway<T> where T : class
 
     public Option<T> Get(FilterSpecification<T>? filterSpecification = null!)
     {
-        return Option.OfObj(_collection
-            .Find(filterSpecification?.SpecificationExpression ?? FilterDefinition<T>.Empty)
-            .SingleOrDefault());
+        return MongoCommonCore.Get(_collection, filterSpecification);
     }
 
     public IEnumerable<T> Enumerate(FilterSpecification<T>? filterSpecification = null!, SortDefinition<T>? sortDefinition = null, int? limit = null)
     {
-        var cursor = _collection.Find(filterSpecification?.SpecificationExpression ?? Builders<T>.Filter.Empty).Limit(limit).ToCursor();
-        while (cursor.MoveNext())
-            foreach (var obj in cursor.Current)
-                yield return obj;
+        return MongoCommonCore.Enumerate(_collection, filterSpecification, sortDefinition, limit);
     }
 
     public IReadOnlyCollection<TOut> Aggregate<TOut>(FilterSpecification<T> filterSpecification, params AggregationSpecification<T>[] aggregationSpecifications)
     {
-        var matchStage = PipelineStageDefinitionBuilder.Match(filterSpecification.SpecificationExpression);
-        var stages = new List<IPipelineStageDefinition> { matchStage };
-        stages.AddRange(aggregationSpecifications.Select(stage => stage.ToPipeline<TOut>()));
-
-        var pipeline = PipelineDefinition<T, TOut>.Create(stages);
-        return _collection.Aggregate(pipeline).ToList();
+        return MongoCommonCore.Aggregate<T, TOut>(_collection, filterSpecification, aggregationSpecifications);
     }
 
     public void Save(T document, Func<T, T>? refineFunc = null, Exception? customExceptionOnDuplicateKey = null)
     {
-        try
-        {
-            var idValue = _idProperty.GetValue(document);
-            var filter = Builders<T>.Filter.Eq(_idProperty.Name, idValue);
-            
-            if (refineFunc is not null)
-                document = refineFunc(document);
-            
-            _collection.ReplaceOne(filter, document, new ReplaceOptions { IsUpsert = true });
-        }
-        catch (MongoWriteException e) when (e.WriteError.Code == (int)MongoErrorCode.DuplicateKey)
-        {
-            if (customExceptionOnDuplicateKey is not null) 
-                throw customExceptionOnDuplicateKey;
+        var idValue = _idProperty.GetValue(document);
+        var filter = Builders<T>.Filter.Eq(_idProperty.Name, idValue);
 
-            throw;
-        }
+        MongoCommonCore.Save(_collection, document, isUpsert: true, filter, refineFunc, customExceptionOnDuplicateKey);
     }
 
     public bool Delete(FilterSpecification<T> filterSpecification)

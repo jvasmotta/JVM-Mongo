@@ -1,34 +1,56 @@
-﻿using MongoDB.Driver;
+﻿using System.Data;
+using System.Reflection;
+using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Driver;
 
 namespace JVM_Mongo;
 
-public interface IDataTransferGateway
-{
-    public IEnumerable<T> LazilyEnumerate<T>(Context collectionContext, FilterDefinition<T>? filterDefinition = null, int? limit = null);
-    public void Save<T>(T obj, Context collectionContext);
-    public void Delete<T>(string id, Context collectionContext);
 
-    public enum Context
-    {
-        WebHook
-    }
+[AttributeUsage(AttributeTargets.Class)]
+public class TransferRecordAttribute(string context) : Attribute
+{
+    public string Context { get; } = context;
 }
 
-public class DataTransferGateway(IMongoDatabase mongoDatabase) : IDataTransferGateway
+public class DataTransferGateway(MongoDb mongoDb)
 {
-    public IEnumerable<T> LazilyEnumerate<T>(IDataTransferGateway.Context collectionContext, FilterDefinition<T>? filterDefinition = null, int? limit = null)
+    private readonly IMongoDatabase _mongoDatabase = mongoDb.GetDatabase("DataTransfer"); 
+
+    public IEnumerable<T> ReadAndDelete<T>()
     {
-        var cursor = mongoDatabase.GetCollection<T>(collectionContext.ToString()).Find(filterDefinition ?? Builders<T>.Filter.Empty).Limit(limit).ToCursor();
-        while (cursor.MoveNext())
-            foreach (var obj in cursor.Current)
-                yield return obj;
+        var collection = _mongoDatabase.GetCollection<T>(GetCollectionName<T>());
+        foreach (var document in MongoCommonCore.Enumerate(collection))
+        {
+            var bsonIdProperty = GetBsonIdProperty<T>();
+            var filter = Builders<T>.Filter.Eq(bsonIdProperty.Name, bsonIdProperty.GetValue(document));
+            collection.DeleteOne(filter);
+            
+            yield return document;
+        }
     }
 
-    public void Save<T>(T obj, IDataTransferGateway.Context collectionContext) => mongoDatabase.GetCollection<T>(collectionContext.ToString()).InsertOne(obj);
-
-    public void Delete<T>(string id, IDataTransferGateway.Context collectionContext)
+    public void Save<T>(T obj)
     {
-        var filter = Builders<T>.Filter.Eq("_id", id);
-        mongoDatabase.GetCollection<T>(collectionContext.ToString()).DeleteOne(filter);
+        MongoCommonCore.Save(_mongoDatabase.GetCollection<T>(GetCollectionName<T>()), obj);
+    }
+
+    private static string GetCollectionName<T>()
+    {
+        var type = typeof(T);
+
+        if (!Attribute.IsDefined(type, typeof(TransferRecordAttribute)))
+            throw new DataException("The record being transferred is not tagged as TransferRecord. Please do");
+
+        var transferRecordAttribute = type.GetCustomAttribute<TransferRecordAttribute>();
+        return transferRecordAttribute!.Context;
+    }
+
+    private static PropertyInfo GetBsonIdProperty<T>()
+    {
+        var properties = typeof(T)
+            .GetProperties()
+            .SingleOrDefault(p => Attribute.IsDefined(p, typeof(BsonIdAttribute)));
+
+        return properties ?? throw new InvalidOperationException($"No property with [BsonId] attribute found in type {typeof(T)}.");
     }
 }
