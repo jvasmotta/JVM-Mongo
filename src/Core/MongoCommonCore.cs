@@ -1,5 +1,7 @@
 ﻿using DiscriminatedOnions;
+using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
+using System.Reflection;
 
 namespace JVM_Mongo;
 
@@ -52,8 +54,8 @@ internal static class MongoCommonCore
 
             if (isUpsert)
                 collection.ReplaceOne(filterDefinition, document, new ReplaceOptions { IsUpsert = true });
-
-            collection.InsertOne(document);
+            else
+                collection.InsertOne(document);
         }
         catch (MongoWriteException e) when (e.WriteError.Code == (int)MongoErrorCode.DuplicateKey)
         {
@@ -68,5 +70,14 @@ internal static class MongoCommonCore
     {
         var deleteResult = collection.DeleteMany(filterSpecification.SpecificationExpression);
         return deleteResult.DeletedCount >= 1;
+    }
+
+    internal static PropertyInfo GetBsonIdProperty<T>()
+    {
+        var properties = typeof(T)
+            .GetProperties()
+            .SingleOrDefault(p => Attribute.IsDefined(p, typeof(BsonIdAttribute)));
+
+        return properties ?? throw new InvalidOperationException($"No property with [BsonId] attribute found in type {typeof(T)}.");
     }
 }

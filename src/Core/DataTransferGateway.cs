@@ -1,6 +1,5 @@
 ﻿using System.Data;
 using System.Reflection;
-using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 
 namespace JVM_Mongo;
@@ -12,16 +11,25 @@ public class TransferRecordAttribute(string context) : Attribute
     public string Context { get; } = context;
 }
 
-public class DataTransferGateway(MongoDb mongoDb)
+public interface IDataTransferGateway
+{
+    IEnumerable<T> ReadAndDelete<T>(FilterSpecification<T>? filterSpecification = null!, SortDefinition<T>? sortDefinition = null, int? limit = null);
+    void Save<T>(T obj);
+}
+
+public class DataTransferGateway(MongoDb mongoDb) : IDataTransferGateway
 {
     private readonly IMongoDatabase _mongoDatabase = mongoDb.GetDatabase("DataTransfer"); 
 
-    public IEnumerable<T> ReadAndDelete<T>()
+    public IEnumerable<T> ReadAndDelete<T>(
+        FilterSpecification<T>? filterSpecification = null!,
+        SortDefinition<T>? sortDefinition = null,
+        int? limit = null)
     {
         var collection = _mongoDatabase.GetCollection<T>(GetCollectionName<T>());
-        foreach (var document in MongoCommonCore.Enumerate(collection))
+        foreach (var document in MongoCommonCore.Enumerate(collection, filterSpecification, sortDefinition, limit))
         {
-            var bsonIdProperty = GetBsonIdProperty<T>();
+            var bsonIdProperty = MongoCommonCore.GetBsonIdProperty<T>();
             var filter = Builders<T>.Filter.Eq(bsonIdProperty.Name, bsonIdProperty.GetValue(document));
             collection.DeleteOne(filter);
             
@@ -43,14 +51,5 @@ public class DataTransferGateway(MongoDb mongoDb)
 
         var transferRecordAttribute = type.GetCustomAttribute<TransferRecordAttribute>();
         return transferRecordAttribute!.Context;
-    }
-
-    private static PropertyInfo GetBsonIdProperty<T>()
-    {
-        var properties = typeof(T)
-            .GetProperties()
-            .SingleOrDefault(p => Attribute.IsDefined(p, typeof(BsonIdAttribute)));
-
-        return properties ?? throw new InvalidOperationException($"No property with [BsonId] attribute found in type {typeof(T)}.");
     }
 }

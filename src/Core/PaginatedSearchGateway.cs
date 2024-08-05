@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Reflection;
+using System.Text.Json;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
@@ -52,6 +53,8 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
         int size = 100,
         TimeSpan? expiringTimeSpan = null) where TMetadata : class, IEquatable<TMetadata>
     {
+        var bsonIdProperty = MongoCommonCore.GetBsonIdProperty<TOut>();
+
         var searchHeaderCollection = mongoDatabase.GetCollection<PaginatedHeader<TMetadata>>(HeaderCollectionName);
         var binarySearchRequest = JsonSerializer.SerializeToUtf8Bytes(searchRequest);
 
@@ -72,7 +75,7 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
         if (results.Any())
             return new PaginatedResult<TOut>(page, size, totalDocuments > (page + 1) * size, header.TotalElements, results);
 
-        return await FetchAndInsertAsync(header, searchResultCollection, fetchFunc, page, size);
+        return await FetchAndInsertAsync(header, searchResultCollection, fetchFunc, bsonIdProperty, page, size);
     }
 
     public async Task UpdateHeaderTotalElements<TMetadata, TRequest>(
@@ -106,6 +109,7 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
         PaginatedHeader<TMetadata> paginatedHeader,
         IMongoCollection<TOut> searchResultCollection,
         Func<IAsyncEnumerable<TOut>> fetchFunc,
+        PropertyInfo bsonIdProperty,
         int page,
         int size) where TMetadata : class, IEquatable<TMetadata>
     {
@@ -124,7 +128,7 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
                 _ = Task.Run(async () =>
                 {
                     await Task.Yield();
-                    await InsertRemainingDocumentsAsync(paginatedHeader, searchResultCollection, fetchFunc);
+                    await InsertRemainingDocumentsAsync(paginatedHeader, searchResultCollection, fetchFunc, bsonIdProperty);
                 });
                 break;
             }
@@ -141,14 +145,27 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
             return new PaginatedResult<TOut>(page, size, false, 0, Array.Empty<TOut>());
         }
     }
+
     private async Task InsertRemainingDocumentsAsync<TMetadata, TOut>(
         PaginatedHeader<TMetadata> paginatedHeader, 
         IMongoCollection<TOut> searchResultCollection,
-        Func<IAsyncEnumerable<TOut>> fetchFunc) where TMetadata : class, IEquatable<TMetadata>
+        Func<IAsyncEnumerable<TOut>> fetchFunc,
+        PropertyInfo bsonIdProperty) where TMetadata : class, IEquatable<TMetadata>
     {
+        var existingDocuments = await searchResultCollection.Find(FilterDefinition<TOut>.Empty).ToListAsync();
+
+        var existingIds = new HashSet<dynamic>();
+        foreach (var idValue in existingDocuments.Select(doc => bsonIdProperty.GetValue(doc))) 
+            if (idValue is not null)
+                existingIds.Add(idValue);
+
         var documentsToInsert = new List<TOut>();
-        await foreach (var item in fetchFunc()) 
-            documentsToInsert.Add(item);
+        await foreach (var item in fetchFunc())
+        {
+            var idValue = bsonIdProperty.GetValue(item);
+            if (idValue != null && !existingIds.Contains(idValue)) 
+                documentsToInsert.Add(item);
+        }
 
         if (documentsToInsert.Any()) 
             await searchResultCollection.InsertManyAsync(documentsToInsert);

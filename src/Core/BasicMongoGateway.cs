@@ -1,7 +1,6 @@
 ﻿using System.Linq.Expressions;
 using System.Reflection;
 using DiscriminatedOnions;
-using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 
 namespace JVM_Mongo;
@@ -26,7 +25,7 @@ public class BasicMongoGateway <T> : IBasicMongoGateway<T> where T : class
     public BasicMongoGateway(IMongoDatabase mongoDatabase, string collectionName, params FieldIndex[] indexesToCreate)
     {
         _collection = mongoDatabase.GetCollection<T>(collectionName);
-        _idProperty = GetBsonIdProperty();
+        _idProperty = MongoCommonCore.GetBsonIdProperty<T>();
 
         foreach (var fieldIndex in indexesToCreate)
         {
@@ -66,14 +65,5 @@ public class BasicMongoGateway <T> : IBasicMongoGateway<T> where T : class
     {
          var deleteResult = _collection.DeleteMany(filterSpecification.SpecificationExpression);
         return deleteResult.DeletedCount >= 1;
-    }
-
-    private static PropertyInfo GetBsonIdProperty()
-    {
-        var properties = typeof(T)
-            .GetProperties()
-            .SingleOrDefault(p => Attribute.IsDefined(p, typeof(BsonIdAttribute)));
-
-        return properties ?? throw new InvalidOperationException($"No property with [BsonId] attribute found in type {typeof(T)}.");
     }
 }
