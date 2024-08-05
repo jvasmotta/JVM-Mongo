@@ -21,8 +21,7 @@ public class PaginatedSearchGatewayTest
     internal record Metadata(string ClientId)
     {
         internal static Metadata Example() => new("ClientId");
-    };
-
+    }
 
     [OneTimeSetUp]
     public void OneTimeSetUp()
