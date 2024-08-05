@@ -28,7 +28,8 @@ public interface IPaginatedSearchGateway
         TRequest searchRequest,
         Func<IAsyncEnumerable<TOut>> fetchFunc, 
         int page = 0, 
-        int size = 100) where TMetadata : class, IEquatable<TMetadata>;
+        int size = 100,
+        TimeSpan? expiringTimeSpan = null) where TMetadata : class, IEquatable<TMetadata>;
 
     Task UpdateHeaderTotalElements<TMetadata, TRequest>(
         TMetadata metadata, 
@@ -48,7 +49,8 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
         TRequest searchRequest,
         Func<IAsyncEnumerable<TOut>> fetchFunc, 
         int page = 0, 
-        int size = 100) where TMetadata : class, IEquatable<TMetadata>
+        int size = 100,
+        TimeSpan? expiringTimeSpan = null) where TMetadata : class, IEquatable<TMetadata>
     {
         var searchHeaderCollection = mongoDatabase.GetCollection<PaginatedHeader<TMetadata>>(HeaderCollectionName);
         var binarySearchRequest = JsonSerializer.SerializeToUtf8Bytes(searchRequest);
@@ -59,7 +61,7 @@ public class PaginatedSearchGateway(IMongoDatabase mongoDatabase, Func<ObjectId>
             Builders<PaginatedHeader<TMetadata>>.Update.SetOnInsert(psc => psc.CollectionName, $"PaginatedSearchResult_{_idGeneratorFunc()}")
                 .SetOnInsert(psc => psc.TotalElements, null)
                 .SetOnInsert(psc => psc.CreatedAt, DateTime.UtcNow)
-                .SetOnInsert(psc => psc.ExpiresAt, DateTime.UtcNow.AddMinutes(30)),
+                .SetOnInsert(psc => psc.ExpiresAt, DateTime.UtcNow.Add(expiringTimeSpan ?? TimeSpan.FromMinutes(30))),
             new FindOneAndUpdateOptions<PaginatedHeader<TMetadata>> { IsUpsert = true, ReturnDocument = ReturnDocument.After }
         );
 
