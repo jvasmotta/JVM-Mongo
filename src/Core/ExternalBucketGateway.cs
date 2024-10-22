@@ -1,6 +1,6 @@
 ﻿using MongoDB.Driver;
 
-namespace JVM_Mongo;
+namespace Ragu.Mongo;
 
 public interface IExternalBucketGateway
 {

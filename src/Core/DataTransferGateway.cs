@@ -2,7 +2,7 @@
 using System.Reflection;
 using MongoDB.Driver;
 
-namespace JVM_Mongo;
+namespace Ragu.Mongo;
 
 
 [AttributeUsage(AttributeTargets.Class)]

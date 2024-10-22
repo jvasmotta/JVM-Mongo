@@ -7,7 +7,7 @@ using MongoDB.Bson.Serialization.Options;
 using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver;
 
-namespace JVM_Mongo;
+namespace Ragu.Mongo;
 
 public class MongoDb : IDisposable
 {

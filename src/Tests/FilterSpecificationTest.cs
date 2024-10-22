@@ -1,5 +1,5 @@
 ﻿using FluentAssertions;
-using JVM_Mongo;
+using Ragu.Mongo;
 
 namespace Tests;
 

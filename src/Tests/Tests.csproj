@@ -26,7 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Core\JVM-Mongo.csproj" />
+    <ProjectReference Include="..\Core\Ragu.Mongo.csproj" />
   </ItemGroup>
 
   <ItemGroup>

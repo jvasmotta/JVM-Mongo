@@ -1,8 +1,8 @@
 ﻿using FluentAssertions;
 using FluentAssertions.Extensions;
-using JVM_Mongo;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
+using Ragu.Mongo;
 using Tests.Utils;
 using static Tests.Constants;
 

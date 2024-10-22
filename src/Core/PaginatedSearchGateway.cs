@@ -4,7 +4,7 @@ using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 
-namespace JVM_Mongo;
+namespace Ragu.Mongo;
 
 public record PaginatedHeader<TMetadata>(
     [property: BsonId] string CollectionName,

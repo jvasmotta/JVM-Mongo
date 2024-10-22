@@ -1,7 +1,7 @@
 ﻿using MongoDB.Bson;
 using MongoDB.Driver;
 
-namespace JVM_Mongo;
+namespace Ragu.Mongo;
 
 public abstract record AggregationSpecification<T>(BsonDocument Document)
 {

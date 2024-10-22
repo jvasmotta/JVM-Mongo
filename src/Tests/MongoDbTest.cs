@@ -1,6 +1,6 @@
 ﻿using FluentAssertions;
-using JVM_Mongo;
 using MongoDB.Driver;
+using Ragu.Mongo;
 using static Tests.Constants;
 
 namespace Tests;

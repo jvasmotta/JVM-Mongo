@@ -1,9 +1,9 @@
-﻿using DiscriminatedOnions;
+﻿using System.Reflection;
+using DiscriminatedOnions;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
-using System.Reflection;
 
-namespace JVM_Mongo;
+namespace Ragu.Mongo;
 
 internal static class MongoCommonCore
 {

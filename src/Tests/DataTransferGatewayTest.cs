@@ -1,8 +1,8 @@
 ﻿using FluentAssertions;
 using FluentAssertions.Extensions;
-using JVM_Mongo;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using Ragu.Mongo;
 using static Tests.Constants;
 
 namespace Tests;

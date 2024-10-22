@@ -1,7 +1,7 @@
 ﻿using System.Collections;
 using System.Linq.Expressions;
 
-namespace JVM_Mongo;
+namespace Ragu.Mongo;
 
 public record struct TimeWindowInterval(DateTime FromCreatedAt, DateTime UntilCreatedAt);
 
