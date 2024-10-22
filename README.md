@@ -1,4 +1,4 @@
-# MongoDB Utilities for JVM_Mongo
+# MongoDB Utilities for Ragu.Mongo
 
 This repository contains a collection of C# classes and interfaces designed to facilitate operations with MongoDB databases. The utilities include basic CRUD operations, aggregation pipelines, and support for bucket-style collections.
 
